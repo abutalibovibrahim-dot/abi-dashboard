@@ -15,6 +15,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
+import time
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -228,7 +229,37 @@ COLORS = {
 # ──────────────────────────────────────────────
 # DATA LAYER
 # ──────────────────────────────────────────────
-@st.cache_data(ttl=3600)   # cache for 1 hour — avoids hammering Yahoo Finance
+
+def _fetch_ticker_info(tkr: str, retries: int = 4) -> dict:
+    """
+    Fetch Yahoo Finance .info for a single ticker with exponential backoff retry.
+    
+    Why this is needed: Streamlit Cloud servers share IP addresses with thousands
+    of other apps all hitting Yahoo Finance. Yahoo rate-limits shared IPs aggressively.
+    Retrying with increasing delays (2s, 4s, 8s, 16s) gives the rate limit time to
+    reset before each attempt.
+    
+    retries=4 means up to 4 attempts total before giving up.
+    """
+    for attempt in range(retries):
+        try:
+            # Small stagger between tickers so we don't fire all requests simultaneously
+            time.sleep(1.5)
+            t = yf.Ticker(tkr)
+            info = t.info
+            # Yahoo sometimes returns a near-empty dict instead of raising an error
+            # Check that we actually got meaningful data back
+            if info and len(info) > 5:
+                return info
+        except Exception:
+            pass
+        # Exponential backoff: wait 2s, then 4s, then 8s, then 16s between retries
+        wait = 2 ** (attempt + 1)
+        time.sleep(wait)
+    return {}   # return empty dict if all retries fail — handled gracefully downstream
+
+
+@st.cache_data(ttl=7200)   # cache for 2 hours — reduces total Yahoo Finance requests
 def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
     """
     Pull key fundamental and market data from Yahoo Finance for each ticker.
@@ -237,8 +268,10 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
     rows = []
     for tkr in tickers:
         try:
-            t = yf.Ticker(tkr)
-            info = t.info
+            info = _fetch_ticker_info(tkr)
+            if not info:
+                st.warning(f"No data returned for {tkr} after retries — skipping.")
+                continue
 
             # ── Helper: safely extract a value ──
             def g(key, default=None):
@@ -310,31 +343,49 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                 "Net Debt ($B)":   round(net_debt/1e9,2)       if net_debt    else None,
             })
         except Exception as e:
-            st.warning(f"Could not fetch {tkr}: {e}")
+            st.warning(f"Could not process {tkr}: {e}")
 
     return pd.DataFrame(rows)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=7200)
 def fetch_price_history(tickers: list[str], period: str = "2y") -> pd.DataFrame:
     """
     Download adjusted close prices for all tickers over the specified period.
     Normalises each series to 100 at the start so you can compare performance.
+    Retries up to 4 times with backoff to handle Yahoo Finance rate limiting.
     """
-    raw = yf.download(tickers, period=period, auto_adjust=True, progress=False)["Close"]
-    if isinstance(raw, pd.Series):          # single ticker edge case
-        raw = raw.to_frame(name=tickers[0])
-    raw.dropna(how="all", inplace=True)
-    normalised = raw.div(raw.iloc[0]).mul(100)   # index = 100 at first date
-    return normalised
+    for attempt in range(4):
+        try:
+            time.sleep(2)
+            raw = yf.download(tickers, period=period, auto_adjust=True,
+                              progress=False, threads=False)["Close"]
+            if isinstance(raw, pd.Series):
+                raw = raw.to_frame(name=tickers[0])
+            raw.dropna(how="all", inplace=True)
+            if raw.empty:
+                raise ValueError("Empty price data returned")
+            normalised = raw.div(raw.iloc[0]).mul(100)
+            return normalised
+        except Exception:
+            time.sleep(2 ** (attempt + 1))
+    return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=7200)
 def fetch_single_price_history(ticker: str, period: str = "3y") -> pd.DataFrame:
     """Raw OHLCV for the focus ticker — used for candlestick and volume chart."""
-    t = yf.Ticker(ticker)
-    hist = t.history(period=period, auto_adjust=True)
-    return hist
+    for attempt in range(4):
+        try:
+            time.sleep(2)
+            t = yf.Ticker(ticker)
+            hist = t.history(period=period, auto_adjust=True)
+            if not hist.empty:
+                return hist
+        except Exception:
+            pass
+        time.sleep(2 ** (attempt + 1))
+    return pd.DataFrame()
 
 
 # ──────────────────────────────────────────────
@@ -609,7 +660,8 @@ if show_thesis:
 # ──────────────────────────────────────────────
 # DATA FETCH
 # ──────────────────────────────────────────────
-with st.spinner("Fetching market data..."):
+st.info("⏳ Fetching live market data from Yahoo Finance — this takes 20–40 seconds on first load due to rate limiting. Data is then cached for 2 hours.", icon="📡")
+with st.spinner("Fetching market data — please wait..."):
     df_fund = fetch_fundamentals(selected_tickers)
     norm_prices = fetch_price_history(selected_tickers, period=period)
 
