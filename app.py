@@ -787,7 +787,7 @@ if show_comps:
 
     # ── Colour ABI row differently via styling ──
     def style_row(row):
-        if row["Ticker"] == FOCUS_TICKER:
+        if row.name == FOCUS_TICKER:   # row.name is the index value after set_index("Ticker")
             return ["background-color: rgba(230,57,70,0.08); color: #f0f4ff; font-weight:600"] * len(row)
         return [""] * len(row)
 
