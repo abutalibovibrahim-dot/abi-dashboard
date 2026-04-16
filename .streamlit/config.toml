@@ -1,7 +1,10 @@
-# No base theme forced — Streamlit will use the user's system preference
-# by default, and the user can switch manually via the top-right menu (⋮ → Settings).
-# The app detects the active theme at runtime via st.get_option("theme.base")
-# and injects the correct colour tokens into the CSS.
+[theme]
+base = "dark"
+backgroundColor = "#0a0e14"
+secondaryBackgroundColor = "#0d1117"
+textColor = "#d4d8e1"
+primaryColor = "#e63946"
+ 
 [server]
 headless = true
 enableCORS = false
