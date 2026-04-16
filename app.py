@@ -34,15 +34,14 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
 # THEME DETECTION
-# st.get_option("theme.base") returns "dark" or "light" based on
-# whatever theme Streamlit is currently using — either set in config.toml,
-# chosen by the user in the Streamlit menu (top right ⋮), or defaulting
-# to their system preference. This is the reliable way to detect theme
-# in Streamlit — CSS prefers-color-scheme does NOT work because Streamlit
-# manages its own theme layer that overrides the browser's native setting.
+# st.get_option("theme.base") only reads the config file, not the runtime
+# selection — so it can't reliably detect when a user switches theme via
+# the Streamlit menu. The robust solution is a manual toggle in session_state
+# that the user controls directly in the sidebar. Defaults to dark.
 # ──────────────────────────────────────────────
-_theme = st.get_option("theme.base") or "dark"
-_is_dark = _theme != "light"
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = True
+_is_dark = st.session_state.dark_mode
 
 # Colour tokens for each theme
 if _is_dark:
@@ -484,14 +483,16 @@ def fetch_single_price_history(ticker: str, period: str = "3y") -> pd.DataFrame:
 # CHART HELPERS
 # ──────────────────────────────────────────────
 CHART_LAYOUT = dict(
-    paper_bgcolor="#0a0e14",
-    plot_bgcolor="#0a0e14",
-    font=dict(family="IBM Plex Mono, monospace", color="#9aa3b8", size=11),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="IBM Plex Mono, monospace", color=_T["chart_font"], size=11),
     margin=dict(l=40, r=20, t=40, b=40),
-    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="#1e2530", borderwidth=1,
-                font=dict(size=10)),
-    xaxis=dict(gridcolor="#1e2530", linecolor="#1e2530", zerolinecolor="#1e2530"),
-    yaxis=dict(gridcolor="#1e2530", linecolor="#1e2530", zerolinecolor="#1e2530"),
+    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=_T["chart_line"],
+                borderwidth=1, font=dict(size=10)),
+    xaxis=dict(gridcolor=_T["chart_grid"], linecolor=_T["chart_line"],
+               zerolinecolor=_T["chart_line"]),
+    yaxis=dict(gridcolor=_T["chart_grid"], linecolor=_T["chart_line"],
+               zerolinecolor=_T["chart_line"]),
 )
 
 
@@ -640,15 +641,33 @@ def leverage_chart(df: pd.DataFrame) -> go.Figure:
 # SIDEBAR
 # ──────────────────────────────────────────────
 with st.sidebar:
+    # ── Theme toggle — placed at top of sidebar for easy access ──
+    # A simple checkbox that writes to session_state.dark_mode.
+    # Because Streamlit reruns the full script on every interaction,
+    # changing this checkbox immediately re-renders the entire page
+    # with the new colour tokens — effectively a live theme switch.
+    st.markdown('<div class="section-label">🎨 Theme</div>', unsafe_allow_html=True)
+    _col1, _col2 = st.columns(2)
+    with _col1:
+        if st.button("🌙 Dark", use_container_width=True,
+                     type="primary" if st.session_state.dark_mode else "secondary"):
+            st.session_state.dark_mode = True
+            st.rerun()
+    with _col2:
+        if st.button("☀️ Light", use_container_width=True,
+                     type="primary" if not st.session_state.dark_mode else "secondary"):
+            st.session_state.dark_mode = False
+            st.rerun()
+
     st.markdown('<div class="section-label">📌 Focus Company</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style='background:#0d1117;border:1px solid #1e2530;border-left:3px solid #e63946;
+    st.markdown(f"""
+    <div style='background:{_T["bg_card"]};border:1px solid {_T["border"]};border-left:3px solid #e63946;
     padding:0.6rem 0.8rem;margin-bottom:1rem;'>
       <div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:#e63946;
       letter-spacing:0.1em;'>SHORT THESIS</div>
-      <div style='font-family:IBM Plex Mono,monospace;font-size:0.85rem;color:#f0f4ff;
+      <div style='font-family:IBM Plex Mono,monospace;font-size:0.85rem;color:{_T["text_primary"]};
       font-weight:600;margin-top:0.2rem;'>Anheuser-Busch InBev</div>
-      <div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:#6b7a99;'>NYSE: BUD</div>
+      <div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:{_T["text_faint"]};'>NYSE: BUD</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -686,8 +705,8 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(f"""
-    <div style='font-family:IBM Plex Mono,monospace;font-size:0.62rem;color:#3a4560;
-    line-height:1.6;'>
+    <div style='font-family:IBM Plex Mono,monospace;font-size:0.62rem;
+    color:{_T["text_ghost"]};line-height:1.6;'>
     Data: Yahoo Finance · yfinance<br>
     Refresh: every 60 min<br>
     Last run: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC<br><br>
@@ -940,8 +959,8 @@ if show_candle:
 # ──────────────────────────────────────────────
 st.markdown("---")
 st.markdown(f"""
-<div style='font-family:IBM Plex Mono,monospace;font-size:0.65rem;color:#3a4560;
-text-align:center;padding:0.5rem 0 1rem;line-height:1.8;'>
+<div style='font-family:IBM Plex Mono,monospace;font-size:0.65rem;
+color:{_T["text_ghost"]};text-align:center;padding:0.5rem 0 1rem;line-height:1.8;'>
   Data sourced from Yahoo Finance via yfinance · LTM multiples only · Not investment advice ·
   Built for portfolio demonstration purposes ·
   {datetime.now().strftime('%Y')}
