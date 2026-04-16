@@ -25,30 +25,46 @@ warnings.filterwarnings("ignore")
 # ──────────────────────────────────────────────
 CACHE_FILE = "/tmp/abi_dashboard_cache.json"
 
-def save_to_disk(df: pd.DataFrame, prices: pd.DataFrame, fetched_at: str):
-    """Save DataFrames to disk as JSON. Called every time we get a good fetch."""
+def save_cache(df: pd.DataFrame, prices: pd.DataFrame, fetched_at: str):
+    """
+    Save last known good data to TWO places:
+    1. st.session_state  — survives page interactions, lost on app restart
+    2. /tmp on disk      — survives Streamlit TTL expiry but lost on container restart
+    Using both maximises the chance of having fallback data available.
+    """
+    payload = {
+        "fetched_at": fetched_at,
+        "fundamentals": df.to_json(orient="records"),
+        "prices": prices.to_json(orient="split") if not prices.empty else None,
+    }
+    # Save to session state (always works)
+    st.session_state["_data_cache"] = payload
+    # Save to disk (best effort)
     try:
-        payload = {
-            "fetched_at": fetched_at,
-            "fundamentals": df.to_json(orient="records"),
-            "prices": prices.to_json(orient="split") if not prices.empty else None,
-        }
         with open(CACHE_FILE, "w") as f:
             json.dump(payload, f)
     except Exception:
-        pass   # disk write failure is non-fatal — app still works without it
+        pass
 
 
-def load_from_disk() -> tuple:
+def load_cache() -> tuple:
     """
-    Load last known good data from disk.
-    Returns (df, prices, fetched_at) or (None, None, None) if no cache exists.
+    Load last known good data. Tries session_state first (fastest),
+    then disk. Returns (df, prices, fetched_at) or (None, None, None).
     """
+    # Try session state first
+    payload = st.session_state.get("_data_cache")
+    # Fall back to disk
+    if not payload:
+        try:
+            if os.path.exists(CACHE_FILE):
+                with open(CACHE_FILE, "r") as f:
+                    payload = json.load(f)
+        except Exception:
+            pass
+    if not payload:
+        return None, None, None
     try:
-        if not os.path.exists(CACHE_FILE):
-            return None, None, None
-        with open(CACHE_FILE, "r") as f:
-            payload = json.load(f)
         df     = pd.read_json(payload["fundamentals"], orient="records")
         prices = pd.read_json(payload["prices"], orient="split") if payload.get("prices") else pd.DataFrame()
         return df, prices, payload.get("fetched_at", "unknown")
@@ -70,6 +86,7 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
 # DARK THEME CONSTANTS
+# Always dark — no switching logic needed.
 # ──────────────────────────────────────────────
 _T = {
     "bg_page":      "#0a0e14",
@@ -286,6 +303,10 @@ COLORS = {
 
 # ──────────────────────────────────────────────
 # DATA LAYER
+# Strategy: use fast_info + financials endpoints instead of .info
+# .info is the most rate-limited Yahoo Finance endpoint.
+# fast_info, .financials, and .balance_sheet use separate endpoints
+# that are significantly more reliable on shared cloud IPs.
 # ──────────────────────────────────────────────
 
 def _safe(val, default=None):
@@ -324,110 +345,144 @@ def _parse_yield(raw) -> float | None:
         return None
 
 
+def _fetch_with_retry(func, retries=4, base_delay=3):
+    """
+    Call func() up to `retries` times with exponential backoff.
+    base_delay=3 means waits: 3s, 6s, 12s, 24s between attempts.
+    Returns the result or None if all attempts fail.
+    This is the core fix for Yahoo Finance rate limiting — 
+    rather than failing silently on the first block, we keep 
+    retrying with increasing patience.
+    """
+    for attempt in range(retries):
+        try:
+            result = func()
+            # Validate result is not empty/None
+            if result is not None:
+                if hasattr(result, "empty") and result.empty:
+                    raise ValueError("Empty result")
+                if isinstance(result, dict) and len(result) < 5:
+                    raise ValueError("Suspiciously small dict")
+            return result
+        except Exception:
+            if attempt < retries - 1:
+                wait = base_delay * (2 ** attempt)   # 3, 6, 12, 24 seconds
+                time.sleep(wait)
+    return None
+
+
 def _get_financials(tkr: str) -> dict:
     """
-    Build a fundamentals dict for one ticker using three separate Yahoo endpoints:
-      1. fast_info   — price, market cap, 52W high/low, beta  (very reliable)
-      2. .income_stmt — revenue, EBITDA, net income           (quarterly filings)
-      3. .balance_sheet — total debt, cash                    (quarterly filings)
-    
-    These endpoints are far more stable than .info on shared IPs because they
-    hit Yahoo's fundamentals API rather than the quote summary API.
-    
-    Falls back gracefully: if any endpoint fails we still return whatever we got.
+    Fetch fundamentals for one ticker using three Yahoo Finance endpoints.
+    Each endpoint has its own retry loop so a failure on one does not 
+    prevent the others from running. We collect whatever we can get.
+
+    Endpoint strategy:
+    - fast_info  : price, mktcap, 52W range — most reliable, rarely blocked
+    - .info      : ratios and multiples — most useful but most rate-limited
+    - .financials: income statement from SEC filings — separate endpoint
+    - .balance_sheet: balance sheet from SEC filings — separate endpoint
     """
     result = {}
-    time.sleep(1)   # small stagger per ticker
+    time.sleep(2)   # base stagger between tickers — reduces burst traffic
 
     t = yf.Ticker(tkr)
 
-    # ── 1. fast_info: price and market data ──────────────────────────────
-    try:
+    # ── 1. fast_info — price & market data ──────────────────────────
+    def get_fast():
         fi = t.fast_info
-        result["price"]       = _safe(fi.last_price)
-        result["mktcap"]      = _safe(fi.market_cap)
-        result["week52_high"] = _safe(fi.fifty_two_week_high)
-        result["week52_low"]  = _safe(fi.fifty_two_week_low)
-        result["shares"]      = _safe(fi.shares)
-    except Exception:
-        pass
+        return {
+            "price":       _safe(fi.last_price),
+            "mktcap":      _safe(fi.market_cap),
+            "week52_high": _safe(fi.fifty_two_week_high),
+            "week52_low":  _safe(fi.fifty_two_week_low),
+        }
+    fast = _fetch_with_retry(get_fast, retries=4, base_delay=2)
+    if fast:
+        result.update(fast)
 
-    # ── 2. .info for ratios that fast_info doesn't expose ────────────────
-    # We still try .info but treat failure as non-fatal
-    try:
+    # ── 2. .info — ratios and multiples ──────────────────────────────
+    def get_info():
         info = t.info
-        if info and len(info) > 10:
-            result["ev"]          = _safe(info.get("enterpriseValue"))
-            result["ev_ebitda"]   = _safe(info.get("enterpriseToEbitda"))
-            result["ev_revenue"]  = _safe(info.get("enterpriseToRevenue"))
-            result["pe"]          = _safe(info.get("trailingPE"))
-            result["pb"]          = _safe(info.get("priceToBook"))
-            result["div_yield"]   = _safe(info.get("dividendYield"))
-            result["payout"]      = _safe(info.get("payoutRatio"))
-            result["beta"]        = _safe(info.get("beta"))
-            result["short_pct"]   = _safe(info.get("shortPercentOfFloat"))
-            result["net_margin"]  = _safe(info.get("profitMargins"))
-            result["rev_growth"]  = _safe(info.get("revenueGrowth"))
-            result["name"]        = info.get("shortName", tkr)
-            result["total_debt"]  = _safe(info.get("totalDebt"))
-            result["cash"]        = _safe(info.get("totalCash"))
-            result["ebitda_info"] = _safe(info.get("ebitda"))
-            result["revenue_info"]= _safe(info.get("totalRevenue"))
-    except Exception:
-        pass
+        if not info or len(info) < 10:
+            raise ValueError("Empty info")
+        return info
+    info = _fetch_with_retry(get_info, retries=4, base_delay=4)
+    if info:
+        result["ev"]          = _safe(info.get("enterpriseValue"))
+        result["ev_ebitda"]   = _safe(info.get("enterpriseToEbitda"))
+        result["ev_revenue"]  = _safe(info.get("enterpriseToRevenue"))
+        result["pe"]          = _safe(info.get("trailingPE"))
+        result["pb"]          = _safe(info.get("priceToBook"))
+        result["div_yield"]   = _safe(info.get("dividendYield"))
+        result["payout"]      = _safe(info.get("payoutRatio"))
+        result["beta"]        = _safe(info.get("beta"))
+        result["short_pct"]   = _safe(info.get("shortPercentOfFloat"))
+        result["net_margin"]  = _safe(info.get("profitMargins"))
+        result["rev_growth"]  = _safe(info.get("revenueGrowth"))
+        result["name"]        = info.get("shortName", tkr)
+        result["total_debt"]  = _safe(info.get("totalDebt"))
+        result["cash"]        = _safe(info.get("totalCash"))
+        result["ebitda_info"] = _safe(info.get("ebitda"))
+        result["revenue_info"]= _safe(info.get("totalRevenue"))
 
-    # ── 3. income_stmt: LTM revenue and operating metrics ────────────────
-    # .financials returns a DataFrame of annual income statement data.
-    # iloc[:,0] is the most recent full year.
-    try:
-        fs = t.financials   # annual income statement
-        if fs is not None and not fs.empty:
-            col = fs.iloc[:, 0]   # most recent year
-            def row(label):
-                matches = [i for i in col.index if label.lower() in i.lower()]
-                return float(col[matches[0]]) if matches else None
+    # ── 3. .financials — income statement ────────────────────────────
+    def get_financials():
+        fs = t.financials
+        if fs is None or fs.empty:
+            raise ValueError("Empty financials")
+        return fs
+    fs = _fetch_with_retry(get_financials, retries=3, base_delay=3)
+    if fs is not None:
+        try:
+            col = fs.iloc[:, 0]
+            def frow(lbl):
+                m = [i for i in col.index if lbl.lower() in str(i).lower()]
+                return float(col[m[0]]) if m else None
+            result["revenue_fs"] = _safe(frow("Total Revenue"))
+            result["ebitda_fs"]  = _safe(frow("EBITDA"))
+            result["ebit_fs"]    = _safe(frow("EBIT"))
+        except Exception:
+            pass
 
-            result["revenue_fs"]  = _safe(row("Total Revenue"))
-            result["ebitda_fs"]   = _safe(row("EBITDA"))
-            result["ebit_fs"]     = _safe(row("EBIT"))
-            result["net_inc_fs"]  = _safe(row("Net Income"))
-    except Exception:
-        pass
-
-    # ── 4. balance_sheet: debt and cash ──────────────────────────────────
-    try:
+    # ── 4. .balance_sheet — debt & cash ──────────────────────────────
+    def get_bs():
         bs = t.balance_sheet
-        if bs is not None and not bs.empty:
+        if bs is None or bs.empty:
+            raise ValueError("Empty balance sheet")
+        return bs
+    bs = _fetch_with_retry(get_bs, retries=3, base_delay=3)
+    if bs is not None:
+        try:
             col = bs.iloc[:, 0]
-            def brow(label):
-                matches = [i for i in col.index if label.lower() in i.lower()]
-                return float(col[matches[0]]) if matches else None
-
+            def brow(lbl):
+                m = [i for i in col.index if lbl.lower() in str(i).lower()]
+                return float(col[m[0]]) if m else None
             result["debt_bs"] = _safe(brow("Total Debt"))
             result["cash_bs"] = _safe(brow("Cash And Cash Equivalents"))
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     return result
 
 
-@st.cache_data(ttl=7200)
+@st.cache_data(ttl=14400, show_spinner=False)   # 4 hour cache — reduces total fetches
 def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
     """
-    Build the comps table. Calls _get_financials() for each ticker,
-    then assembles a clean DataFrame with calculated ratios.
+    Build the comps table. Fetches each ticker sequentially with retries.
+    ttl=14400 (4 hours) means once we get a good fetch, it stays valid longer,
+    reducing how often we need to hit Yahoo Finance.
     """
     rows = []
     progress = st.progress(0, text="Fetching market data...")
 
     for i, tkr in enumerate(tickers):
-        progress.progress((i) / len(tickers), text=f"Fetching {tkr}...")
+        progress.progress(i / len(tickers), text=f"Fetching {tkr}... ({i+1}/{len(tickers)})")
         try:
             d = _get_financials(tkr)
             if not d:
                 continue
 
-            # Prefer financials endpoint data; fall back to .info data
             revenue  = d.get("revenue_fs")  or d.get("revenue_info")
             ebitda   = d.get("ebitda_fs")   or d.get("ebitda_info")
             debt     = d.get("debt_bs")     or d.get("total_debt")
@@ -435,48 +490,46 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
             price    = d.get("price")
             mktcap   = d.get("mktcap")
 
-            # Calculated metrics
-            net_debt        = (debt - cash)         if (debt and cash is not None) else None
-            ebitda_margin   = (ebitda / revenue)    if (ebitda and revenue)        else None
-            net_debt_ebitda = (net_debt / ebitda)   if (net_debt and ebitda and ebitda > 0) else None
+            net_debt        = (debt - cash)         if (debt is not None and cash is not None) else None
+            ebitda_margin   = (ebitda / revenue)    if (ebitda and revenue)                    else None
+            net_debt_ebitda = (net_debt / ebitda)   if (net_debt is not None and ebitda and ebitda > 0) else None
 
-            # EV: use from .info if available, else estimate as mktcap + net_debt
             ev = d.get("ev")
             if not ev and mktcap and net_debt:
                 ev = mktcap + net_debt
 
-            ev_ebitda = d.get("ev_ebitda") or (round(ev/ebitda, 1) if (ev and ebitda and ebitda > 0) else None)
-            ev_revenue= d.get("ev_revenue") or (round(ev/revenue, 2) if (ev and revenue and revenue > 0) else None)
+            ev_ebitda = d.get("ev_ebitda") or (round(ev/ebitda,1)  if (ev and ebitda and ebitda>0)  else None)
+            ev_revenue= d.get("ev_revenue") or (round(ev/revenue,2) if (ev and revenue and revenue>0) else None)
 
             rows.append({
                 "Ticker":          tkr,
                 "Company":         d.get("name", DEFAULT_PEERS.get(tkr, tkr)),
-                "Price":           round(price, 2)         if price    else None,
-                "Mkt Cap ($B)":    round(mktcap/1e9, 1)   if mktcap   else None,
-                "EV ($B)":         round(ev/1e9, 1)        if ev       else None,
+                "Price":           round(price,2)           if price    else None,
+                "Mkt Cap ($B)":    round(mktcap/1e9,1)     if mktcap   else None,
+                "EV ($B)":         round(ev/1e9,1)          if ev       else None,
                 "52W High":        round(d.get("week52_high"),2) if d.get("week52_high") else None,
                 "52W Low":         round(d.get("week52_low"),2)  if d.get("week52_low")  else None,
                 "EV/EBITDA":       ev_ebitda,
                 "EV/Revenue":      ev_revenue,
-                "P/E":             round(d.get("pe"),1)    if d.get("pe")    else None,
-                "P/B":             round(d.get("pb"),2)    if d.get("pb")    else None,
-                "EBITDA Margin":   round(ebitda_margin*100,1)   if ebitda_margin   else None,
+                "P/E":             round(d.get("pe"),1)     if d.get("pe")         else None,
+                "P/B":             round(d.get("pb"),2)     if d.get("pb")         else None,
+                "EBITDA Margin":   round(ebitda_margin*100,1)       if ebitda_margin       else None,
                 "Net Margin":      round(d.get("net_margin")*100,1) if d.get("net_margin") else None,
                 "Rev Growth YoY":  round(d.get("rev_growth")*100,1) if d.get("rev_growth") else None,
-                "Net Debt/EBITDA": round(net_debt_ebitda,1)          if net_debt_ebitda     else None,
+                "Net Debt/EBITDA": round(net_debt_ebitda,1)         if net_debt_ebitda is not None else None,
                 "Div Yield":       _parse_yield(d.get("div_yield")),
-                "Payout Ratio":    round(d.get("payout")*100,1)      if d.get("payout")     else None,
-                "Beta":            round(d.get("beta"),2)             if d.get("beta")       else None,
-                "Short % Float":   round(d.get("short_pct")*100,2)   if d.get("short_pct")  else None,
+                "Payout Ratio":    round(d.get("payout")*100,1)     if d.get("payout")     else None,
+                "Beta":            round(d.get("beta"),2)            if d.get("beta")       else None,
+                "Short % Float":   round(d.get("short_pct")*100,2)  if d.get("short_pct")  else None,
                 "Revenue ($B)":    round(revenue/1e9,2)  if revenue  else None,
                 "EBITDA ($B)":     round(ebitda/1e9,2)   if ebitda   else None,
-                "Net Debt ($B)":   round(net_debt/1e9,2) if net_debt else None,
+                "Net Debt ($B)":   round(net_debt/1e9,2) if net_debt is not None else None,
             })
         except Exception as e:
-            st.warning(f"Error processing {tkr}: {e}")
+            st.warning(f"Could not process {tkr}: {e}")
 
-    progress.progress(1.0, text="Data loaded.")
-    time.sleep(0.5)
+    progress.progress(1.0, text="Done.")
+    time.sleep(0.4)
     progress.empty()
     return pd.DataFrame(rows)
 
@@ -756,6 +809,7 @@ st.markdown(f"""
     </div>
   </div>
   <div>
+    <span class="header-badge">SHORT: BUD</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -782,11 +836,11 @@ with st.spinner("Fetching market data..."):
 if not df_fund.empty:
     # Good fetch — save to disk so this becomes the new fallback
     _now = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
-    save_to_disk(df_fund, norm_prices, _now)
+    save_cache(df_fund, norm_prices, _now)
     _fetched_at = _now
 else:
     # Live fetch failed — try loading last known good data from disk
-    _cached_df, _cached_prices, _fetched_at = load_from_disk()
+    _cached_df, _cached_prices, _fetched_at = load_cache()
     if _cached_df is not None and not _cached_df.empty:
         df_fund     = _cached_df
         norm_prices = _cached_prices if _cached_prices is not None else pd.DataFrame()
