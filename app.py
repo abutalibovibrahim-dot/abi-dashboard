@@ -22,6 +22,11 @@ warnings.filterwarnings("ignore")
 
 # ──────────────────────────────────────────────
 # PERSISTENT CACHE — last known good data
+# Streamlit Cloud gives each app a writable /tmp directory.
+# We save the last successful fetch here as JSON so if Yahoo
+# Finance is rate-limiting, the dashboard can show stale data
+# rather than going blank. The timestamp tells the user how
+# old the data is so they know it may not be live.
 # ──────────────────────────────────────────────
 CACHE_FILE = "/tmp/abi_dashboard_cache.json"
 
@@ -87,6 +92,9 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 # DARK THEME CONSTANTS
 # Always dark — no switching logic needed.
+# All colours defined once here as a dict so they can be
+# referenced in both CSS (via f-string injection) and
+# Python components like Plotly and pandas styler.
 # ──────────────────────────────────────────────
 _T = {
     "bg_page":      "#0a0e14",
@@ -345,182 +353,139 @@ def _parse_yield(raw) -> float | None:
         return None
 
 
-def _fetch_with_retry(func, retries=4, base_delay=3):
+def _get_ticker_data(tkr: str) -> dict:
     """
-    Call func() up to `retries` times with exponential backoff.
-    base_delay=3 means waits: 3s, 6s, 12s, 24s between attempts.
-    Returns the result or None if all attempts fail.
-    This is the core fix for Yahoo Finance rate limiting — 
-    rather than failing silently on the first block, we keep 
-    retrying with increasing patience.
+    Fetch all available data for one ticker as fast as possible.
+    Strategy: fire all requests with minimal delay, no long retry loops.
+    If a request fails we skip it and use what we got — partial data
+    is better than waiting 45 seconds for complete data.
+    The 4-hour cache means we only hit Yahoo once every 4 hours per ticker.
     """
-    for attempt in range(retries):
-        try:
-            result = func()
-            # Validate result is not empty/None
-            if result is not None:
-                if hasattr(result, "empty") and result.empty:
-                    raise ValueError("Empty result")
-                if isinstance(result, dict) and len(result) < 5:
-                    raise ValueError("Suspiciously small dict")
-            return result
-        except Exception:
-            if attempt < retries - 1:
-                wait = base_delay * (2 ** attempt)   # 3, 6, 12, 24 seconds
-                time.sleep(wait)
-    return None
-
-
-def _get_financials(tkr: str) -> dict:
-    """
-    Fetch fundamentals for one ticker using three Yahoo Finance endpoints.
-    Each endpoint has its own retry loop so a failure on one does not 
-    prevent the others from running. We collect whatever we can get.
-
-    Endpoint strategy:
-    - fast_info  : price, mktcap, 52W range — most reliable, rarely blocked
-    - .info      : ratios and multiples — most useful but most rate-limited
-    - .financials: income statement from SEC filings — separate endpoint
-    - .balance_sheet: balance sheet from SEC filings — separate endpoint
-    """
-    result = {}
-    time.sleep(2)   # base stagger between tickers — reduces burst traffic
-
+    result = {"ticker": tkr}
     t = yf.Ticker(tkr)
 
-    # ── 1. fast_info — price & market data ──────────────────────────
-    def get_fast():
+    # ── fast_info: price and market cap — most reliable endpoint ──
+    # Separate try block so a failure here doesn't block anything else
+    try:
         fi = t.fast_info
-        return {
-            "price":       _safe(fi.last_price),
-            "mktcap":      _safe(fi.market_cap),
-            "week52_high": _safe(fi.fifty_two_week_high),
-            "week52_low":  _safe(fi.fifty_two_week_low),
-        }
-    fast = _fetch_with_retry(get_fast, retries=4, base_delay=2)
-    if fast:
-        result.update(fast)
+        p = fi.last_price
+        m = fi.market_cap
+        # Explicit None checks — do not use _safe() here because
+        # _safe() converts 0 to None which would hide $0 price edge cases
+        result["price"]       = float(p) if p is not None else None
+        result["mktcap"]      = float(m) if m is not None else None
+        result["week52_high"] = float(fi.fifty_two_week_high) if fi.fifty_two_week_high else None
+        result["week52_low"]  = float(fi.fifty_two_week_low)  if fi.fifty_two_week_low  else None
+    except Exception:
+        pass
 
-    # ── 2. .info — ratios and multiples ──────────────────────────────
-    def get_info():
+    # ── .info: multiples and ratios ──
+    try:
         info = t.info
-        if not info or len(info) < 10:
-            raise ValueError("Empty info")
-        return info
-    info = _fetch_with_retry(get_info, retries=4, base_delay=4)
-    if info:
-        result["ev"]          = _safe(info.get("enterpriseValue"))
-        result["ev_ebitda"]   = _safe(info.get("enterpriseToEbitda"))
-        result["ev_revenue"]  = _safe(info.get("enterpriseToRevenue"))
-        result["pe"]          = _safe(info.get("trailingPE"))
-        result["pb"]          = _safe(info.get("priceToBook"))
-        result["div_yield"]   = _safe(info.get("dividendYield"))
-        result["payout"]      = _safe(info.get("payoutRatio"))
-        result["beta"]        = _safe(info.get("beta"))
-        result["short_pct"]   = _safe(info.get("shortPercentOfFloat"))
-        result["net_margin"]  = _safe(info.get("profitMargins"))
-        result["rev_growth"]  = _safe(info.get("revenueGrowth"))
-        result["name"]        = info.get("shortName", tkr)
-        result["total_debt"]  = _safe(info.get("totalDebt"))
-        result["cash"]        = _safe(info.get("totalCash"))
-        result["ebitda_info"] = _safe(info.get("ebitda"))
-        result["revenue_info"]= _safe(info.get("totalRevenue"))
+        if info and len(info) > 5:
+            def g(k): return _safe(info.get(k))
+            result["name"]        = info.get("shortName") or tkr
+            result["ev"]          = g("enterpriseValue")
+            result["ev_ebitda"]   = g("enterpriseToEbitda")
+            result["ev_revenue"]  = g("enterpriseToRevenue")
+            result["pe"]          = g("trailingPE")
+            result["pb"]          = g("priceToBook")
+            result["div_yield"]   = g("dividendYield")
+            result["payout"]      = g("payoutRatio")
+            result["beta"]        = g("beta")
+            result["short_pct"]   = g("shortPercentOfFloat")
+            result["net_margin"]  = g("profitMargins")
+            result["rev_growth"]  = g("revenueGrowth")
+            result["total_debt"]  = g("totalDebt")
+            result["cash"]        = g("totalCash")
+            result["ebitda_info"] = g("ebitda")
+            result["revenue_info"]= g("totalRevenue")
+    except Exception:
+        pass
 
-    # ── 3. .financials — income statement ────────────────────────────
-    def get_financials():
+    # ── financials: income statement ──
+    try:
         fs = t.financials
-        if fs is None or fs.empty:
-            raise ValueError("Empty financials")
-        return fs
-    fs = _fetch_with_retry(get_financials, retries=3, base_delay=3)
-    if fs is not None:
-        try:
+        if fs is not None and not fs.empty:
             col = fs.iloc[:, 0]
             def frow(lbl):
                 m = [i for i in col.index if lbl.lower() in str(i).lower()]
                 return float(col[m[0]]) if m else None
             result["revenue_fs"] = _safe(frow("Total Revenue"))
             result["ebitda_fs"]  = _safe(frow("EBITDA"))
-            result["ebit_fs"]    = _safe(frow("EBIT"))
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-    # ── 4. .balance_sheet — debt & cash ──────────────────────────────
-    def get_bs():
+    # ── balance sheet: debt and cash ──
+    try:
         bs = t.balance_sheet
-        if bs is None or bs.empty:
-            raise ValueError("Empty balance sheet")
-        return bs
-    bs = _fetch_with_retry(get_bs, retries=3, base_delay=3)
-    if bs is not None:
-        try:
+        if bs is not None and not bs.empty:
             col = bs.iloc[:, 0]
             def brow(lbl):
                 m = [i for i in col.index if lbl.lower() in str(i).lower()]
                 return float(col[m[0]]) if m else None
             result["debt_bs"] = _safe(brow("Total Debt"))
             result["cash_bs"] = _safe(brow("Cash And Cash Equivalents"))
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return result
 
 
-@st.cache_data(ttl=14400, show_spinner=False)   # 4 hour cache — reduces total fetches
+@st.cache_data(ttl=14400, show_spinner=False)
 def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
     """
-    Build the comps table. Fetches each ticker sequentially with retries.
-    ttl=14400 (4 hours) means once we get a good fetch, it stays valid longer,
-    reducing how often we need to hit Yahoo Finance.
+    Build comps table. One request per ticker, no long retry waits.
+    ttl=14400 = 4 hour cache so we fetch as infrequently as possible.
     """
     rows = []
     progress = st.progress(0, text="Fetching market data...")
 
     for i, tkr in enumerate(tickers):
         progress.progress(i / len(tickers), text=f"Fetching {tkr}... ({i+1}/{len(tickers)})")
+        time.sleep(0.8)   # small stagger — avoids burst hitting Yahoo
         try:
-            d = _get_financials(tkr)
-            if not d:
-                continue
+            d = _get_ticker_data(tkr)
 
-            revenue  = d.get("revenue_fs")  or d.get("revenue_info")
-            ebitda   = d.get("ebitda_fs")   or d.get("ebitda_info")
-            debt     = d.get("debt_bs")     or d.get("total_debt")
-            cash     = d.get("cash_bs")     or d.get("cash")
-            price    = d.get("price")
-            mktcap   = d.get("mktcap")
+            # Prefer filing data, fall back to .info data
+            revenue = d.get("revenue_fs")  or d.get("revenue_info")
+            ebitda  = d.get("ebitda_fs")   or d.get("ebitda_info")
+            debt    = d.get("debt_bs")     or d.get("total_debt")
+            cash    = d.get("cash_bs")     or d.get("cash")
+            price   = d.get("price")
+            mktcap  = d.get("mktcap")
 
-            net_debt        = (debt - cash)         if (debt is not None and cash is not None) else None
-            ebitda_margin   = (ebitda / revenue)    if (ebitda and revenue)                    else None
-            net_debt_ebitda = (net_debt / ebitda)   if (net_debt is not None and ebitda and ebitda > 0) else None
+            net_debt        = (debt - cash)        if (debt is not None and cash is not None) else None
+            ebitda_margin   = (ebitda / revenue)   if (ebitda and revenue)                    else None
+            net_debt_ebitda = (net_debt / ebitda)  if (net_debt is not None and ebitda and ebitda > 0) else None
 
             ev = d.get("ev")
-            if not ev and mktcap and net_debt:
+            if not ev and mktcap and net_debt is not None:
                 ev = mktcap + net_debt
 
-            ev_ebitda = d.get("ev_ebitda") or (round(ev/ebitda,1)  if (ev and ebitda and ebitda>0)  else None)
-            ev_revenue= d.get("ev_revenue") or (round(ev/revenue,2) if (ev and revenue and revenue>0) else None)
+            ev_ebitda  = d.get("ev_ebitda")  or (round(ev/ebitda,1)   if (ev and ebitda and ebitda>0)   else None)
+            ev_revenue = d.get("ev_revenue") or (round(ev/revenue,2)  if (ev and revenue and revenue>0) else None)
 
             rows.append({
                 "Ticker":          tkr,
                 "Company":         d.get("name", DEFAULT_PEERS.get(tkr, tkr)),
-                "Price":           round(price,2)           if price    else None,
-                "Mkt Cap ($B)":    round(mktcap/1e9,1)     if mktcap   else None,
-                "EV ($B)":         round(ev/1e9,1)          if ev       else None,
-                "52W High":        round(d.get("week52_high"),2) if d.get("week52_high") else None,
-                "52W Low":         round(d.get("week52_low"),2)  if d.get("week52_low")  else None,
+                "Price":           round(price,2)         if price  is not None else None,
+                "Mkt Cap ($B)":    round(mktcap/1e9,1)   if mktcap is not None else None,
+                "EV ($B)":         round(ev/1e9,1)        if ev     is not None else None,
+                "52W High":        round(d["week52_high"],2) if d.get("week52_high") else None,
+                "52W Low":         round(d["week52_low"],2)  if d.get("week52_low")  else None,
                 "EV/EBITDA":       ev_ebitda,
                 "EV/Revenue":      ev_revenue,
-                "P/E":             round(d.get("pe"),1)     if d.get("pe")         else None,
-                "P/B":             round(d.get("pb"),2)     if d.get("pb")         else None,
-                "EBITDA Margin":   round(ebitda_margin*100,1)       if ebitda_margin       else None,
-                "Net Margin":      round(d.get("net_margin")*100,1) if d.get("net_margin") else None,
-                "Rev Growth YoY":  round(d.get("rev_growth")*100,1) if d.get("rev_growth") else None,
-                "Net Debt/EBITDA": round(net_debt_ebitda,1)         if net_debt_ebitda is not None else None,
+                "P/E":             round(d["pe"],1)       if d.get("pe")         else None,
+                "P/B":             round(d["pb"],2)       if d.get("pb")         else None,
+                "EBITDA Margin":   round(ebitda_margin*100,1)        if ebitda_margin       else None,
+                "Net Margin":      round(d["net_margin"]*100,1)      if d.get("net_margin") else None,
+                "Rev Growth YoY":  round(d["rev_growth"]*100,1)      if d.get("rev_growth") else None,
+                "Net Debt/EBITDA": round(net_debt_ebitda,1)          if net_debt_ebitda is not None else None,
                 "Div Yield":       _parse_yield(d.get("div_yield")),
-                "Payout Ratio":    round(d.get("payout")*100,1)     if d.get("payout")     else None,
-                "Beta":            round(d.get("beta"),2)            if d.get("beta")       else None,
-                "Short % Float":   round(d.get("short_pct")*100,2)  if d.get("short_pct")  else None,
+                "Payout Ratio":    round(d["payout"]*100,1)          if d.get("payout")     else None,
+                "Beta":            round(d["beta"],2)                 if d.get("beta")       else None,
+                "Short % Float":   round(d["short_pct"]*100,2)       if d.get("short_pct")  else None,
                 "Revenue ($B)":    round(revenue/1e9,2)  if revenue  else None,
                 "EBITDA ($B)":     round(ebitda/1e9,2)   if ebitda   else None,
                 "Net Debt ($B)":   round(net_debt/1e9,2) if net_debt is not None else None,
@@ -529,7 +494,7 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
             st.warning(f"Could not process {tkr}: {e}")
 
     progress.progress(1.0, text="Done.")
-    time.sleep(0.4)
+    time.sleep(0.3)
     progress.empty()
     return pd.DataFrame(rows)
 
@@ -683,9 +648,24 @@ def scatter_multiple_vs_growth(df: pd.DataFrame) -> go.Figure:
     """
     Bubble chart: EV/EBITDA (y) vs Revenue Growth (x), sized by Market Cap.
     Highlights overvaluation vs growth — the core of the short argument.
+    Defensive: resets index if Ticker was accidentally set as index upstream.
     """
+    df = df.copy()
+    if df.index.name == "Ticker":
+        df = df.reset_index()   # move Ticker back to a regular column
+    if "Ticker" not in df.columns:
+        df["Ticker"] = df.index.astype(str)
     df_s = df.dropna(subset=["EV/EBITDA", "Rev Growth YoY", "Mkt Cap ($B)"])
     fig = go.Figure()
+    if df_s.empty:
+        fig.update_layout(**CHART_LAYOUT, height=380,
+                          title=dict(text="EV/EBITDA vs Revenue Growth — Peer Scatter",
+                                     font=dict(size=12), x=0))
+        fig.add_annotation(text="Insufficient data — EV/EBITDA or Rev Growth not available for peers",
+                           xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+                           font=dict(color=_T["text_faint"], size=11,
+                                     family="IBM Plex Mono, monospace"))
+        return fig
     for _, row in df_s.iterrows():
         is_focus = row["Ticker"] == FOCUS_TICKER
         fig.add_trace(go.Scatter(
@@ -808,9 +788,7 @@ st.markdown(f"""
       {datetime.now().strftime('%d %b %Y %H:%M')} UTC
     </div>
   </div>
-  <div>
-    <span class="header-badge">SHORT: BUD</span>
-  </div>
+
 </div>
 """, unsafe_allow_html=True)
 
@@ -1017,8 +995,7 @@ if show_charts:
         st.plotly_chart(indexed_price_chart(norm_prices, selected_tickers),
                         use_container_width=True, config={"displayModeBar": False})
     with c2:
-        df_scatter = df_fund.copy()
-        df_scatter = df_scatter.set_index("Ticker")
+        # Pass df_fund directly — Ticker must be a column, not the index
         st.plotly_chart(scatter_multiple_vs_growth(df_fund),
                         use_container_width=True, config={"displayModeBar": False})
 
