@@ -1,3 +1,7 @@
+# No base theme forced — Streamlit will use the user's system preference
+# by default, and the user can switch manually via the top-right menu (⋮ → Settings).
+# The app detects the active theme at runtime via st.get_option("theme.base")
+# and injects the correct colour tokens into the CSS.
 [server]
 headless = true
 enableCORS = false
