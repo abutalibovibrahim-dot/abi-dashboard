@@ -2,7 +2,7 @@
 ═══════════════════════════════════════════════════════════════════
   GLOBAL BEVERAGES TRADING COMPARABLES DASHBOARD
   Focus: Anheuser-Busch InBev Short Thesis
-  Author: [Ibrahim AButalibov]
+  Author: [Ibrahim Abutalibov]
   Stack: Python · Streamlit · yfinance · plotly
 ═══════════════════════════════════════════════════════════════════
 """
@@ -16,8 +16,50 @@ from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
 import time
+import json
+import os
 import warnings
 warnings.filterwarnings("ignore")
+
+# ──────────────────────────────────────────────
+# PERSISTENT CACHE — last known good data
+# Streamlit Cloud gives each app a writable /tmp directory.
+# We save the last successful fetch here as JSON so if Yahoo
+# Finance is rate-limiting, the dashboard can show stale data
+# rather than going blank. The timestamp tells the user how
+# old the data is so they know it may not be live.
+# ──────────────────────────────────────────────
+CACHE_FILE = "/tmp/abi_dashboard_cache.json"
+
+def save_to_disk(df: pd.DataFrame, prices: pd.DataFrame, fetched_at: str):
+    """Save DataFrames to disk as JSON. Called every time we get a good fetch."""
+    try:
+        payload = {
+            "fetched_at": fetched_at,
+            "fundamentals": df.to_json(orient="records"),
+            "prices": prices.to_json(orient="split") if not prices.empty else None,
+        }
+        with open(CACHE_FILE, "w") as f:
+            json.dump(payload, f)
+    except Exception:
+        pass   # disk write failure is non-fatal — app still works without it
+
+
+def load_from_disk() -> tuple:
+    """
+    Load last known good data from disk.
+    Returns (df, prices, fetched_at) or (None, None, None) if no cache exists.
+    """
+    try:
+        if not os.path.exists(CACHE_FILE):
+            return None, None, None
+        with open(CACHE_FILE, "r") as f:
+            payload = json.load(f)
+        df     = pd.read_json(payload["fundamentals"], orient="records")
+        prices = pd.read_json(payload["prices"], orient="split") if payload.get("prices") else pd.DataFrame()
+        return df, prices, payload.get("fetched_at", "unknown")
+    except Exception:
+        return None, None, None
 
 # ──────────────────────────────────────────────
 # PAGE CONFIG
@@ -672,13 +714,19 @@ with st.sidebar:
     show_candle    = st.toggle("Show BUD candlestick",   value=True)
 
     st.markdown("---")
+    st.markdown('<div class="section-label">🔄 Data</div>', unsafe_allow_html=True)
+    if st.button("Refresh data", use_container_width=True, key="sidebar_refresh"):
+        fetch_fundamentals.clear()
+        fetch_price_history.clear()
+        fetch_single_price_history.clear()
+        st.rerun()
     st.markdown(f"""
     <div style='font-family:IBM Plex Mono,monospace;font-size:0.62rem;
-    color:{_T["text_ghost"]};line-height:1.6;'>
-    Data: Yahoo Finance · yfinance<br>
-    Refresh: every 60 min<br>
+    color:{_T["text_ghost"]};line-height:1.8;margin-top:0.5rem;'>
+    Source: Yahoo Finance · yfinance<br>
+    Cache: 2h in-memory + disk fallback<br>
     Last run: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC<br><br>
-    ⚠ LTM multiples only.<br>Forward estimates excluded.
+    ⚠ LTM multiples only.<br>Not investment advice.
     </div>
     """, unsafe_allow_html=True)
 
@@ -696,9 +744,39 @@ st.markdown(f"""
     </div>
   </div>
   <div>
+    <span class="header-badge">SHORT: BUD</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Data status banner ──
+# Shows whether data is live or from cache, with timestamp.
+# If cached, a warning banner prompts the user to refresh.
+_hcol1, _hcol2 = st.columns([5, 1])
+with _hcol1:
+    if _data_status == "live":
+        st.markdown(
+            f'''<div style="font-family:IBM Plex Mono,monospace;font-size:0.65rem;
+            color:{_T["text_faint"]};padding:0.2rem 0 0.8rem;">
+            <span style="color:#2dd4bf;">●</span>&nbsp; LIVE DATA &nbsp;·&nbsp;
+            Last fetched: {_fetched_at}
+            </div>''',
+            unsafe_allow_html=True
+        )
+    else:
+        st.warning(
+            f"⚠️ Showing cached data from **{_fetched_at}** — "
+            "Yahoo Finance is currently rate-limiting this server. "
+            "Click **Refresh data** to retry.",
+            icon="🕐"
+        )
+with _hcol2:
+    if st.button("🔄 Refresh data", use_container_width=True):
+        # Clear Streamlit's in-memory cache so next run re-fetches from Yahoo
+        fetch_fundamentals.clear()
+        fetch_price_history.clear()
+        fetch_single_price_history.clear()
+        st.rerun()
 
 
 # ──────────────────────────────────────────────
@@ -709,13 +787,34 @@ st.markdown(f"""
 # ──────────────────────────────────────────────
 # DATA FETCH
 # ──────────────────────────────────────────────
-with st.spinner("Loading..."):
-    df_fund = fetch_fundamentals(selected_tickers)
-    norm_prices = fetch_price_history(selected_tickers, period=period)
+# ── Attempt live fetch ──
+# If Yahoo Finance is rate-limiting, the functions return empty DataFrames.
+# In that case we fall back to the last known good data saved on disk.
+_data_status = "live"   # track whether we're showing live or cached data
 
-if df_fund.empty:
-    st.error("No data returned. Check tickers and try again.")
-    st.stop()
+with st.spinner("Fetching market data..."):
+    df_fund      = fetch_fundamentals(selected_tickers)
+    norm_prices  = fetch_price_history(selected_tickers, period=period)
+
+if not df_fund.empty:
+    # Good fetch — save to disk so this becomes the new fallback
+    _now = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
+    save_to_disk(df_fund, norm_prices, _now)
+    _fetched_at = _now
+else:
+    # Live fetch failed — try loading last known good data from disk
+    _cached_df, _cached_prices, _fetched_at = load_from_disk()
+    if _cached_df is not None and not _cached_df.empty:
+        df_fund     = _cached_df
+        norm_prices = _cached_prices if _cached_prices is not None else pd.DataFrame()
+        _data_status = "cached"
+    else:
+        # No live data AND no cache — nothing to show
+        st.error(
+            "⚠️ Unable to fetch market data and no cached data available. "
+            "Yahoo Finance may be rate-limiting this server. Please try again in a few minutes."
+        )
+        st.stop()
 
 # ── BUD row for KPIs ──
 bud_row = df_fund[df_fund["Ticker"] == FOCUS_TICKER]
