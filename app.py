@@ -2,7 +2,6 @@
 ═══════════════════════════════════════════════════════════════════
   GLOBAL BEVERAGES TRADING COMPARABLES DASHBOARD
   Focus: Anheuser-Busch InBev Short Thesis
-  Author: [Ibrahim Abutalibov]
   Stack: Python · Streamlit · yfinance · plotly
 ═══════════════════════════════════════════════════════════════════
 """
@@ -749,34 +748,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Data status banner ──
-# Shows whether data is live or from cache, with timestamp.
-# If cached, a warning banner prompts the user to refresh.
-_hcol1, _hcol2 = st.columns([5, 1])
-with _hcol1:
-    if _data_status => "live":
-        st.markdown(
-            f'''<div style="font-family:IBM Plex Mono,monospace;font-size:0.65rem;
-            color:{_T["text_faint"]};padding:0.2rem 0 0.8rem;">
-            <span style="color:#2dd4bf;">●</span>&nbsp; LIVE DATA &nbsp;·&nbsp;
-            Last fetched: {_fetched_at}
-            </div>''',
-            unsafe_allow_html=True
-        )
-    else:
-        st.warning(
-            f"⚠️ Showing cached data from **{_fetched_at}** — "
-            "Yahoo Finance is currently rate-limiting this server. "
-            "Click **Refresh data** to retry.",
-            icon="🕐"
-        )
-with _hcol2:
-    if st.button("🔄 Refresh data", use_container_width=True):
-        # Clear Streamlit's in-memory cache so next run re-fetches from Yahoo
-        fetch_fundamentals.clear()
-        fetch_price_history.clear()
-        fetch_single_price_history.clear()
-        st.rerun()
 
 
 # ──────────────────────────────────────────────
@@ -815,6 +786,32 @@ else:
             "Yahoo Finance may be rate-limiting this server. Please try again in a few minutes."
         )
         st.stop()
+
+# ── Data status banner + refresh button ──
+# Rendered AFTER the fetch so _data_status and _fetched_at are guaranteed to exist.
+_hcol1, _hcol2 = st.columns([5, 1])
+with _hcol1:
+    if _data_status == "live":
+        st.markdown(
+            f'''<div style="font-family:IBM Plex Mono,monospace;font-size:0.65rem;
+            color:{_T["text_faint"]};padding:0.2rem 0 0.6rem;">
+            <span style="color:#2dd4bf;">●</span>&nbsp; LIVE DATA &nbsp;·&nbsp;
+            Last fetched: {_fetched_at}
+            </div>''',
+            unsafe_allow_html=True
+        )
+    else:
+        st.warning(
+            f"⚠️ Showing cached data from **{_fetched_at}**. "
+            "Yahoo Finance is rate-limiting this server. Click **Refresh data** to retry.",
+            icon="🕐"
+        )
+with _hcol2:
+    if st.button("🔄 Refresh", use_container_width=True):
+        fetch_fundamentals.clear()
+        fetch_price_history.clear()
+        fetch_single_price_history.clear()
+        st.rerun()
 
 # ── BUD row for KPIs ──
 bud_row = df_fund[df_fund["Ticker"] == FOCUS_TICKER]
