@@ -756,7 +756,6 @@ st.markdown(f"""
     </div>
   </div>
   <div>
-    <span class="header-badge">SHORT: BUD</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
