@@ -754,7 +754,7 @@ st.markdown(f"""
 # If cached, a warning banner prompts the user to refresh.
 _hcol1, _hcol2 = st.columns([5, 1])
 with _hcol1:
-    if _data_status == "live":
+    if _data_status => "live":
         st.markdown(
             f'''<div style="font-family:IBM Plex Mono,monospace;font-size:0.65rem;
             color:{_T["text_faint"]};padding:0.2rem 0 0.8rem;">
