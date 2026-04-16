@@ -2,7 +2,7 @@
 ═══════════════════════════════════════════════════════════════════
   GLOBAL BEVERAGES TRADING COMPARABLES DASHBOARD
   Focus: Anheuser-Busch InBev Short Thesis
-  Author: [Your Name]
+  Author: [Ibrahim Abutalibov]
   Stack: Python · Streamlit · yfinance · plotly
 ═══════════════════════════════════════════════════════════════════
 """
@@ -34,167 +34,158 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 st.markdown("""
 <style>
-  /* ── Google Fonts ── */
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-  /* ── Base ── */
-  html, body, [class*="css"] {
-    font-family: 'IBM Plex Sans', sans-serif;
-    background-color: #0a0e14;
-    color: #d4d8e1;
+/* ── DARK MODE (default) ── */
+:root {
+  --bg-page:      #0a0e14;
+  --bg-card:      #0d1117;
+  --border:       #1e2530;
+  --text-primary: #f0f4ff;
+  --text-muted:   #9aa3b8;
+  --text-faint:   #6b7a99;
+  --text-ghost:   #2a3550;
+  --input-bg:     #0d1117;
+}
+/* ── LIGHT MODE ── */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-page:      #f4f6fb;
+    --bg-card:      #ffffff;
+    --border:       #dde1ea;
+    --text-primary: #0f172a;
+    --text-muted:   #475569;
+    --text-faint:   #94a3b8;
+    --text-ghost:   #cbd5e1;
+    --input-bg:     #ffffff;
   }
+}
 
-  /* ── Main container ── */
-  .main .block-container {
-    padding: 1.5rem 2rem;
-    max-width: 1400px;
-  }
+html, body, [class*="css"] {
+  font-family: 'IBM Plex Sans', sans-serif;
+  background-color: var(--bg-page) !important;
+  color: var(--text-muted) !important;
+}
+.stApp { background-color: var(--bg-page) !important; }
+.main .block-container { padding: 1.5rem 2rem; max-width: 1400px; background-color: var(--bg-page) !important; }
 
-  /* ── Sidebar ── */
-  [data-testid="stSidebar"] {
-    background-color: #0d1117;
-    border-right: 1px solid #1e2530;
-  }
-  [data-testid="stSidebar"] .block-container { padding: 1.5rem 1rem; }
+[data-testid="stSidebar"] {
+  background-color: var(--bg-card) !important;
+  border-right: 1px solid var(--border) !important;
+}
+[data-testid="stSidebar"] .block-container { padding: 1.5rem 1rem; }
 
-  /* ── Header strip ── */
-  .header-strip {
-    background: linear-gradient(90deg, #0d1117 0%, #111827 100%);
-    border: 1px solid #1e2530;
-    border-left: 3px solid #e63946;
-    padding: 1rem 1.5rem;
-    margin-bottom: 1.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .header-title {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #f0f4ff;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .header-sub {
-    font-size: 0.75rem;
-    color: #6b7a99;
-    font-family: 'IBM Plex Mono', monospace;
-    margin-top: 0.2rem;
-  }
-  .header-badge {
-    background: #e63946;
-    color: white;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 0.25rem 0.6rem;
-    letter-spacing: 0.08em;
-  }
+.header-strip {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid #e63946;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.header-sub {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  font-family: 'IBM Plex Mono', monospace;
+  margin-top: 0.2rem;
+}
+.header-badge {
+  background: #e63946;
+  color: white;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  letter-spacing: 0.08em;
+}
+.section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-faint);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+  margin-bottom: 1rem;
+  margin-top: 1.5rem;
+}
+.kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 1rem 1.2rem;
+  position: relative;
+}
+.kpi-card.focus { border-left: 3px solid #e63946; }
+.kpi-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-faint);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+.kpi-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.thesis-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid #e63946;
+  padding: 1rem 1.2rem;
+  margin-bottom: 1.5rem;
+}
+.thesis-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  color: #e63946;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.thesis-text {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.pill {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.5rem;
+  margin: 0.15rem;
+  border: 1px solid;
+}
+.pill-red   { border-color:#e63946; color:#e63946; background:rgba(230,57,70,0.08); }
+.pill-teal  { border-color:#2dd4bf; color:#2dd4bf; background:rgba(45,212,191,0.08); }
+.pill-amber { border-color:#f59e0b; color:#f59e0b; background:rgba(245,158,11,0.08); }
 
-  /* ── Section labels ── */
-  .section-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.65rem;
-    color: #6b7a99;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    border-bottom: 1px solid #1e2530;
-    padding-bottom: 0.4rem;
-    margin-bottom: 1rem;
-    margin-top: 1.5rem;
-  }
+::-webkit-scrollbar { width:4px; height:4px; }
+::-webkit-scrollbar-track { background:var(--bg-page); }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 
-  /* ── KPI cards ── */
-  .kpi-card {
-    background: #0d1117;
-    border: 1px solid #1e2530;
-    padding: 1rem 1.2rem;
-    position: relative;
-  }
-  .kpi-card.focus {
-    border-left: 3px solid #e63946;
-  }
-  .kpi-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.65rem;
-    color: #6b7a99;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    margin-bottom: 0.3rem;
-  }
-  .kpi-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 1.4rem;
-    font-weight: 600;
-    color: #f0f4ff;
-  }
-  .kpi-delta {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.72rem;
-    margin-top: 0.2rem;
-  }
-  .kpi-delta.neg { color: #e63946; }
-  .kpi-delta.pos { color: #2dd4bf; }
-
-  /* ── Comps table ── */
-  .stDataFrame { font-family: 'IBM Plex Mono', monospace !important; }
-
-  /* ── Thesis box ── */
-  .thesis-box {
-    background: #0d1117;
-    border: 1px solid #1e2530;
-    border-left: 3px solid #e63946;
-    padding: 1rem 1.2rem;
-    margin-bottom: 1.5rem;
-  }
-  .thesis-title {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.7rem;
-    color: #e63946;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    margin-bottom: 0.5rem;
-  }
-  .thesis-text {
-    font-size: 0.82rem;
-    color: #9aa3b8;
-    line-height: 1.6;
-  }
-
-  /* ── Metric pill ── */
-  .pill {
-    display: inline-block;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.65rem;
-    padding: 0.15rem 0.5rem;
-    margin: 0.15rem;
-    border: 1px solid;
-  }
-  .pill-red   { border-color: #e63946; color: #e63946; background: rgba(230,57,70,0.08); }
-  .pill-teal  { border-color: #2dd4bf; color: #2dd4bf; background: rgba(45,212,191,0.08); }
-  .pill-amber { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,0.08); }
-
-  /* ── Scrollbar ── */
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: #0a0e14; }
-  ::-webkit-scrollbar-thumb { background: #1e2530; border-radius: 2px; }
-
-  /* ── Streamlit overrides ── */
-  .stMetric { background: #0d1117; border: 1px solid #1e2530; padding: 0.8rem; }
-  div[data-testid="metric-container"] { background: #0d1117; border: 1px solid #1e2530; padding: 0.8rem; }
-  .stSelectbox label, .stMultiselect label, .stSlider label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.7rem !important;
-    color: #6b7a99 !important;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-  h1, h2, h3 {
-    font-family: 'IBM Plex Mono', monospace !important;
-    color: #f0f4ff !important;
-  }
-  .stAlert { background: #0d1117; border: 1px solid #1e2530; }
+.stSelectbox label, .stMultiselect label, .stSlider label {
+  font-family: 'IBM Plex Mono', monospace !important;
+  font-size: 0.7rem !important;
+  color: var(--text-faint) !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+h1,h2,h3 { font-family:'IBM Plex Mono',monospace !important; color:var(--text-primary) !important; }
+.stAlert { background:var(--bg-card) !important; border:1px solid var(--border) !important; }
+hr { border-color:var(--border) !important; opacity:1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
