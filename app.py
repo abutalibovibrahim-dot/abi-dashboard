@@ -32,51 +32,85 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 # CUSTOM CSS — Finance-grade dark theme
 # ──────────────────────────────────────────────
-st.markdown("""
+# ──────────────────────────────────────────────
+# THEME DETECTION
+# st.get_option("theme.base") returns "dark" or "light" based on
+# whatever theme Streamlit is currently using — either set in config.toml,
+# chosen by the user in the Streamlit menu (top right ⋮), or defaulting
+# to their system preference. This is the reliable way to detect theme
+# in Streamlit — CSS prefers-color-scheme does NOT work because Streamlit
+# manages its own theme layer that overrides the browser's native setting.
+# ──────────────────────────────────────────────
+_theme = st.get_option("theme.base") or "dark"
+_is_dark = _theme != "light"
+
+# Colour tokens for each theme
+if _is_dark:
+    _T = {
+        "bg_page":      "#0a0e14",
+        "bg_card":      "#0d1117",
+        "bg_card2":     "#111827",
+        "border":       "#1e2530",
+        "text_primary": "#f0f4ff",
+        "text_muted":   "#9aa3b8",
+        "text_faint":   "#6b7a99",
+        "text_ghost":   "#2a3550",
+        "input_bg":     "#0d1117",
+        "chart_grid":   "rgba(100,120,150,0.15)",
+        "chart_line":   "rgba(100,120,150,0.25)",
+        "chart_font":   "#6b7a99",
+    }
+else:
+    _T = {
+        "bg_page":      "#f4f6fb",
+        "bg_card":      "#ffffff",
+        "bg_card2":     "#f8faff",
+        "border":       "#dde1ea",
+        "text_primary": "#0f172a",
+        "text_muted":   "#334155",
+        "text_faint":   "#64748b",
+        "text_ghost":   "#cbd5e1",
+        "input_bg":     "#ffffff",
+        "chart_grid":   "rgba(30,40,60,0.08)",
+        "chart_line":   "rgba(30,40,60,0.15)",
+        "chart_font":   "#64748b",
+    }
+
+st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-/* ── DARK MODE (default) ── */
-:root {
-  --bg-page:      #0a0e14;
-  --bg-card:      #0d1117;
-  --border:       #1e2530;
-  --text-primary: #f0f4ff;
-  --text-muted:   #9aa3b8;
-  --text-faint:   #6b7a99;
-  --text-ghost:   #2a3550;
-  --input-bg:     #0d1117;
-}
-/* ── LIGHT MODE ── */
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg-page:      #f4f6fb;
-    --bg-card:      #ffffff;
-    --border:       #dde1ea;
-    --text-primary: #0f172a;
-    --text-muted:   #475569;
-    --text-faint:   #94a3b8;
-    --text-ghost:   #cbd5e1;
-    --input-bg:     #ffffff;
-  }
-}
+:root {{
+  --bg-page:      {_T["bg_page"]};
+  --bg-card:      {_T["bg_card"]};
+  --bg-card2:     {_T["bg_card2"]};
+  --border:       {_T["border"]};
+  --text-primary: {_T["text_primary"]};
+  --text-muted:   {_T["text_muted"]};
+  --text-faint:   {_T["text_faint"]};
+  --text-ghost:   {_T["text_ghost"]};
+  --input-bg:     {_T["input_bg"]};
+}}
 
-html, body, [class*="css"] {
+html, body, [class*="css"] {{
   font-family: 'IBM Plex Sans', sans-serif;
   background-color: var(--bg-page) !important;
   color: var(--text-muted) !important;
-}
-.stApp { background-color: var(--bg-page) !important; }
-.main .block-container { padding: 1.5rem 2rem; max-width: 1400px; background-color: var(--bg-page) !important; }
-
-[data-testid="stSidebar"] {
+}}
+.stApp {{ background-color: var(--bg-page) !important; }}
+.main .block-container {{
+  padding: 1.5rem 2rem;
+  max-width: 1400px;
+  background-color: var(--bg-page) !important;
+}}
+[data-testid="stSidebar"] {{
   background-color: var(--bg-card) !important;
   border-right: 1px solid var(--border) !important;
-}
-[data-testid="stSidebar"] .block-container { padding: 1.5rem 1rem; }
+}}
+[data-testid="stSidebar"] .block-container {{ padding: 1.5rem 1rem; }}
 
-.header-strip {
-  background: var(--bg-card);
+.header-strip {{
+  background: linear-gradient(90deg, var(--bg-card) 0%, var(--bg-card2) 100%);
   border: 1px solid var(--border);
   border-left: 3px solid #e63946;
   padding: 1rem 1.5rem;
@@ -84,22 +118,22 @@ html, body, [class*="css"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-.header-title {
+}}
+.header-title {{
   font-family: 'IBM Plex Mono', monospace;
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-.header-sub {
+}}
+.header-sub {{
   font-size: 0.75rem;
   color: var(--text-faint);
   font-family: 'IBM Plex Mono', monospace;
   margin-top: 0.2rem;
-}
-.header-badge {
+}}
+.header-badge {{
   background: #e63946;
   color: white;
   font-family: 'IBM Plex Mono', monospace;
@@ -107,8 +141,8 @@ html, body, [class*="css"] {
   font-weight: 600;
   padding: 0.25rem 0.6rem;
   letter-spacing: 0.08em;
-}
-.section-label {
+}}
+.section-label {{
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.65rem;
   color: var(--text-faint);
@@ -118,74 +152,80 @@ html, body, [class*="css"] {
   padding-bottom: 0.4rem;
   margin-bottom: 1rem;
   margin-top: 1.5rem;
-}
-.kpi-card {
+}}
+.kpi-card {{
   background: var(--bg-card);
   border: 1px solid var(--border);
   padding: 1rem 1.2rem;
   position: relative;
-}
-.kpi-card.focus { border-left: 3px solid #e63946; }
-.kpi-label {
+}}
+.kpi-card.focus {{ border-left: 3px solid #e63946; }}
+.kpi-label {{
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.65rem;
   color: var(--text-faint);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   margin-bottom: 0.3rem;
-}
-.kpi-value {
+}}
+.kpi-value {{
   font-family: 'IBM Plex Mono', monospace;
   font-size: 1.4rem;
   font-weight: 600;
   color: var(--text-primary);
-}
-.thesis-box {
+}}
+.thesis-box {{
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-left: 3px solid #e63946;
   padding: 1rem 1.2rem;
   margin-bottom: 1.5rem;
-}
-.thesis-title {
+}}
+.thesis-title {{
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.7rem;
   color: #e63946;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   margin-bottom: 0.5rem;
-}
-.thesis-text {
+}}
+.thesis-text {{
   font-size: 0.82rem;
   color: var(--text-muted);
   line-height: 1.6;
-}
-.pill {
+}}
+.pill {{
   display: inline-block;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.65rem;
   padding: 0.15rem 0.5rem;
   margin: 0.15rem;
   border: 1px solid;
-}
-.pill-red   { border-color:#e63946; color:#e63946; background:rgba(230,57,70,0.08); }
-.pill-teal  { border-color:#2dd4bf; color:#2dd4bf; background:rgba(45,212,191,0.08); }
-.pill-amber { border-color:#f59e0b; color:#f59e0b; background:rgba(245,158,11,0.08); }
+}}
+.pill-red   {{ border-color:#e63946; color:#e63946; background:rgba(230,57,70,0.08); }}
+.pill-teal  {{ border-color:#2dd4bf; color:#2dd4bf; background:rgba(45,212,191,0.08); }}
+.pill-amber {{ border-color:#f59e0b; color:#f59e0b; background:rgba(245,158,11,0.08); }}
 
-::-webkit-scrollbar { width:4px; height:4px; }
-::-webkit-scrollbar-track { background:var(--bg-page); }
-::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+::-webkit-scrollbar {{ width:4px; height:4px; }}
+::-webkit-scrollbar-track {{ background: var(--bg-page); }}
+::-webkit-scrollbar-thumb {{ background: var(--border); border-radius:2px; }}
 
-.stSelectbox label, .stMultiselect label, .stSlider label {
+.stSelectbox label, .stMultiselect label, .stSlider label {{
   font-family: 'IBM Plex Mono', monospace !important;
   font-size: 0.7rem !important;
   color: var(--text-faint) !important;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-h1,h2,h3 { font-family:'IBM Plex Mono',monospace !important; color:var(--text-primary) !important; }
-.stAlert { background:var(--bg-card) !important; border:1px solid var(--border) !important; }
-hr { border-color:var(--border) !important; opacity:1 !important; }
+}}
+h1,h2,h3 {{
+  font-family: 'IBM Plex Mono', monospace !important;
+  color: var(--text-primary) !important;
+}}
+.stAlert {{
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+}}
+hr {{ border-color: var(--border) !important; opacity:1 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
