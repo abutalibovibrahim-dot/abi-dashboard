@@ -2,7 +2,7 @@
 ═══════════════════════════════════════════════════════════════════
   GLOBAL BEVERAGES TRADING COMPARABLES DASHBOARD
   Focus: Anheuser-Busch InBev Short Thesis
-  Author: [Ibrahim Abutalibov]
+  Author: [Ibrahim AButalibov]
   Stack: Python · Streamlit · yfinance · plotly
 ═══════════════════════════════════════════════════════════════════
 """
@@ -33,198 +33,194 @@ st.set_page_config(
 # CUSTOM CSS — Finance-grade dark theme
 # ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
-# THEME DETECTION
-# st.get_option("theme.base") only reads the config file, not the runtime
-# selection — so it can't reliably detect when a user switches theme via
-# the Streamlit menu. The robust solution is a manual toggle in session_state
-# that the user controls directly in the sidebar. Defaults to dark.
+# DARK THEME CONSTANTS
+# Always dark — no switching logic needed.
+# All colours defined once here as a dict so they can be
+# referenced in both CSS (via f-string injection) and
+# Python components like Plotly and pandas styler.
 # ──────────────────────────────────────────────
-if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = True
-_is_dark = st.session_state.dark_mode
-
-# Colour tokens for each theme
-if _is_dark:
-    _T = {
-        "bg_page":      "#0a0e14",
-        "bg_card":      "#0d1117",
-        "bg_card2":     "#111827",
-        "border":       "#1e2530",
-        "text_primary": "#f0f4ff",
-        "text_muted":   "#9aa3b8",
-        "text_faint":   "#6b7a99",
-        "text_ghost":   "#2a3550",
-        "input_bg":     "#0d1117",
-        "chart_grid":   "rgba(100,120,150,0.15)",
-        "chart_line":   "rgba(100,120,150,0.25)",
-        "chart_font":   "#6b7a99",
-    }
-else:
-    _T = {
-        "bg_page":      "#f4f6fb",
-        "bg_card":      "#ffffff",
-        "bg_card2":     "#f8faff",
-        "border":       "#dde1ea",
-        "text_primary": "#0f172a",
-        "text_muted":   "#334155",
-        "text_faint":   "#64748b",
-        "text_ghost":   "#cbd5e1",
-        "input_bg":     "#ffffff",
-        "chart_grid":   "rgba(30,40,60,0.08)",
-        "chart_line":   "rgba(30,40,60,0.15)",
-        "chart_font":   "#64748b",
-    }
+_T = {
+    "bg_page":      "#0a0e14",
+    "bg_card":      "#0d1117",
+    "bg_card2":     "#111827",
+    "border":       "#1e2530",
+    "text_primary": "#f0f4ff",
+    "text_muted":   "#9aa3b8",
+    "text_faint":   "#6b7a99",
+    "text_ghost":   "#2a3550",
+    "chart_grid":   "rgba(100,120,150,0.12)",
+    "chart_line":   "rgba(100,120,150,0.22)",
+    "chart_font":   "#6b7a99",
+}
 
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-:root {{
-  --bg-page:      {_T["bg_page"]};
-  --bg-card:      {_T["bg_card"]};
-  --bg-card2:     {_T["bg_card2"]};
-  --border:       {_T["border"]};
-  --text-primary: {_T["text_primary"]};
-  --text-muted:   {_T["text_muted"]};
-  --text-faint:   {_T["text_faint"]};
-  --text-ghost:   {_T["text_ghost"]};
-  --input-bg:     {_T["input_bg"]};
+/* Force dark on every element — overrides Streamlit light mode, system preference,
+   and browser defaults. Using !important throughout ensures nothing leaks through. */
+html, body, [class*="css"], .stApp, section[data-testid="stSidebar"],
+div[data-testid="stAppViewContainer"], div[data-testid="stHeader"],
+div[data-testid="stToolbar"], .main, .block-container {{
+    background-color: {_T["bg_page"]} !important;
+    color: {_T["text_muted"]} !important;
 }}
 
-html, body, [class*="css"] {{
-  font-family: 'IBM Plex Sans', sans-serif;
-  background-color: var(--bg-page) !important;
-  color: var(--text-muted) !important;
-}}
-.stApp {{ background-color: var(--bg-page) !important; }}
 .main .block-container {{
-  padding: 1.5rem 2rem;
-  max-width: 1400px;
-  background-color: var(--bg-page) !important;
+    padding: 1.5rem 2rem;
+    max-width: 1400px;
+    background-color: {_T["bg_page"]} !important;
 }}
+
 [data-testid="stSidebar"] {{
-  background-color: var(--bg-card) !important;
-  border-right: 1px solid var(--border) !important;
+    background-color: {_T["bg_card"]} !important;
+    border-right: 1px solid {_T["border"]} !important;
 }}
 [data-testid="stSidebar"] .block-container {{ padding: 1.5rem 1rem; }}
 
+/* ── Header ── */
 .header-strip {{
-  background: linear-gradient(90deg, var(--bg-card) 0%, var(--bg-card2) 100%);
-  border: 1px solid var(--border);
-  border-left: 3px solid #e63946;
-  padding: 1rem 1.5rem;
-  margin-bottom: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+    background: linear-gradient(90deg, {_T["bg_card"]} 0%, {_T["bg_card2"]} 100%);
+    border: 1px solid {_T["border"]};
+    border-left: 3px solid #e63946;
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }}
 .header-title {{
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: {_T["text_primary"]};
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
 }}
 .header-sub {{
-  font-size: 0.75rem;
-  color: var(--text-faint);
-  font-family: 'IBM Plex Mono', monospace;
-  margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: {_T["text_faint"]};
+    font-family: 'IBM Plex Mono', monospace;
+    margin-top: 0.2rem;
 }}
 .header-badge {{
-  background: #e63946;
-  color: white;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.25rem 0.6rem;
-  letter-spacing: 0.08em;
+    background: #e63946;
+    color: white;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.25rem 0.6rem;
+    letter-spacing: 0.08em;
 }}
+
+/* ── Section labels ── */
 .section-label {{
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.65rem;
-  color: var(--text-faint);
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.4rem;
-  margin-bottom: 1rem;
-  margin-top: 1.5rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: {_T["text_faint"]};
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    border-bottom: 1px solid {_T["border"]};
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
+    margin-top: 1.5rem;
 }}
+
+/* ── KPI cards ── */
 .kpi-card {{
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  padding: 1rem 1.2rem;
-  position: relative;
+    background: {_T["bg_card"]};
+    border: 1px solid {_T["border"]};
+    padding: 1rem 1.2rem;
 }}
 .kpi-card.focus {{ border-left: 3px solid #e63946; }}
 .kpi-label {{
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.65rem;
-  color: var(--text-faint);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin-bottom: 0.3rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: {_T["text_faint"]};
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
 }}
 .kpi-value {{
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 1.4rem;
-  font-weight: 600;
-  color: var(--text-primary);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: {_T["text_primary"]};
 }}
-.thesis-box {{
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-left: 3px solid #e63946;
-  padding: 1rem 1.2rem;
-  margin-bottom: 1.5rem;
-}}
-.thesis-title {{
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.7rem;
-  color: #e63946;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  margin-bottom: 0.5rem;
-}}
-.thesis-text {{
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  line-height: 1.6;
-}}
+
+/* ── Pills ── */
 .pill {{
-  display: inline-block;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.65rem;
-  padding: 0.15rem 0.5rem;
-  margin: 0.15rem;
-  border: 1px solid;
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    padding: 0.15rem 0.5rem;
+    margin: 0.15rem;
+    border: 1px solid;
 }}
 .pill-red   {{ border-color:#e63946; color:#e63946; background:rgba(230,57,70,0.08); }}
 .pill-teal  {{ border-color:#2dd4bf; color:#2dd4bf; background:rgba(45,212,191,0.08); }}
 .pill-amber {{ border-color:#f59e0b; color:#f59e0b; background:rgba(245,158,11,0.08); }}
 
-::-webkit-scrollbar {{ width:4px; height:4px; }}
-::-webkit-scrollbar-track {{ background: var(--bg-page); }}
-::-webkit-scrollbar-thumb {{ background: var(--border); border-radius:2px; }}
+/* ── Inputs & controls ── */
+.stTextInput input, .stSelectbox > div > div,
+input, select, textarea {{
+    background: {_T["bg_card"]} !important;
+    border: 1px solid {_T["border"]} !important;
+    color: {_T["text_primary"]} !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+}}
+label, .stSelectbox label, .stMultiselect label,
+.stSlider label, .stTextInput label {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.7rem !important;
+    color: {_T["text_faint"]} !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+}}
+.stButton > button {{
+    background: {_T["bg_card"]} !important;
+    border: 1px solid {_T["border"]} !important;
+    color: {_T["text_muted"]} !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.72rem !important;
+}}
+.stButton > button:hover {{
+    border-color: #e63946 !important;
+    color: #e63946 !important;
+}}
 
-.stSelectbox label, .stMultiselect label, .stSlider label {{
-  font-family: 'IBM Plex Mono', monospace !important;
-  font-size: 0.7rem !important;
-  color: var(--text-faint) !important;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+/* ── Expander ── */
+div[data-testid="stExpander"] {{
+    background: {_T["bg_card"]} !important;
+    border: 1px solid {_T["border"]} !important;
 }}
-h1,h2,h3 {{
-  font-family: 'IBM Plex Mono', monospace !important;
-  color: var(--text-primary) !important;
+
+/* ── DataFrame ── */
+.stDataFrame, [data-testid="stDataFrame"] {{
+    background: {_T["bg_card"]} !important;
 }}
+.stDataFrame tbody tr td, .stDataFrame thead tr th {{
+    background-color: {_T["bg_card"]} !important;
+    color: {_T["text_muted"]} !important;
+    border-color: {_T["border"]} !important;
+}}
+
+/* ── Alerts / warnings ── */
 .stAlert {{
-  background: var(--bg-card) !important;
-  border: 1px solid var(--border) !important;
+    background: {_T["bg_card"]} !important;
+    border: 1px solid {_T["border"]} !important;
+    color: {_T["text_muted"]} !important;
 }}
-hr {{ border-color: var(--border) !important; opacity:1 !important; }}
+
+/* ── Misc ── */
+h1, h2, h3 {{
+    font-family: 'IBM Plex Mono', monospace !important;
+    color: {_T["text_primary"]} !important;
+}}
+hr {{ border-color: {_T["border"]} !important; opacity: 1 !important; }}
+::-webkit-scrollbar {{ width: 4px; height: 4px; }}
+::-webkit-scrollbar-track {{ background: {_T["bg_page"]}; }}
+::-webkit-scrollbar-thumb {{ background: {_T["border"]}; border-radius: 2px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -641,35 +637,8 @@ def leverage_chart(df: pd.DataFrame) -> go.Figure:
 # SIDEBAR
 # ──────────────────────────────────────────────
 with st.sidebar:
-    # ── Theme toggle — placed at top of sidebar for easy access ──
-    # A simple checkbox that writes to session_state.dark_mode.
-    # Because Streamlit reruns the full script on every interaction,
-    # changing this checkbox immediately re-renders the entire page
-    # with the new colour tokens — effectively a live theme switch.
-    st.markdown('<div class="section-label">🎨 Theme</div>', unsafe_allow_html=True)
-    _col1, _col2 = st.columns(2)
-    with _col1:
-        if st.button("🌙 Dark", use_container_width=True,
-                     type="primary" if st.session_state.dark_mode else "secondary"):
-            st.session_state.dark_mode = True
-            st.rerun()
-    with _col2:
-        if st.button("☀️ Light", use_container_width=True,
-                     type="primary" if not st.session_state.dark_mode else "secondary"):
-            st.session_state.dark_mode = False
-            st.rerun()
-
     st.markdown('<div class="section-label">📌 Focus Company</div>', unsafe_allow_html=True)
-    st.markdown(f"""
-    <div style='background:{_T["bg_card"]};border:1px solid {_T["border"]};border-left:3px solid #e63946;
-    padding:0.6rem 0.8rem;margin-bottom:1rem;'>
-      <div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:#e63946;
-      letter-spacing:0.1em;'>SHORT THESIS</div>
-      <div style='font-family:IBM Plex Mono,monospace;font-size:0.85rem;color:{_T["text_primary"]};
-      font-weight:600;margin-top:0.2rem;'>Anheuser-Busch InBev</div>
-      <div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:{_T["text_faint"]};'>NYSE: BUD</div>
-    </div>
-    """, unsafe_allow_html=True)
+    
 
     st.markdown('<div class="section-label">🔍 Peer Group</div>', unsafe_allow_html=True)
     st.caption("Add tickers (Yahoo Finance format — e.g. HEINY, DEO, 2503.T)")
@@ -698,7 +667,6 @@ with st.sidebar:
     period = period_map[period_label]
 
     st.markdown('<div class="section-label">⚙️ Display</div>', unsafe_allow_html=True)
-    show_thesis    = st.toggle("Show thesis summary",    value=True)
     show_comps     = st.toggle("Show comps table",       value=True)
     show_charts    = st.toggle("Show peer charts",       value=True)
     show_candle    = st.toggle("Show BUD candlestick",   value=True)
@@ -737,35 +705,6 @@ st.markdown(f"""
 # ──────────────────────────────────────────────
 # THESIS SUMMARY BOX
 # ──────────────────────────────────────────────
-if show_thesis:
-    st.markdown("""
-    <div class="thesis-box">
-      <div class="thesis-title">📋 Investment Thesis — SHORT Anheuser-Busch InBev (BUD)</div>
-      <div class="thesis-text">
-        ABI trades at a <b style='color:#f0f4ff'>premium EV/EBITDA multiple to peers</b> despite
-        structurally deteriorating fundamentals across its core developed markets.
-        Three secular forces are compressing volume: <b style='color:#f0f4ff'>(1)</b> GLP-1 drug
-        adoption reducing caloric intake and alcohol tolerance across the US consumer base;
-        <b style='color:#f0f4ff'>(2)</b> a documented decline in alcohol consumption among
-        Gen Z relative to all prior cohorts; and <b style='color:#f0f4ff'>(3)</b> brand
-        damage persisting in the US following the 2023 Bud Light controversy.
-        ABI carries <b style='color:#f0f4ff'>elevated leverage</b> (residual from the 2016 SABMiller
-        acquisition) constraining its ability to invest through the volume headwinds.
-        The bull case rests on emerging market volume growth and FCF conversion —
-        both of which face increasing pressure from FX and input cost inflation.
-      </div>
-      <div style='margin-top:0.6rem;'>
-        <span class="pill pill-red">Volume Decline</span>
-        <span class="pill pill-red">GLP-1 Headwind</span>
-        <span class="pill pill-red">Gen Z Secular Shift</span>
-        <span class="pill pill-red">Premium Valuation</span>
-        <span class="pill pill-amber">High Leverage</span>
-        <span class="pill pill-amber">Brand Damage</span>
-        <span class="pill pill-teal">Watch: EM Volume</span>
-        <span class="pill pill-teal">Watch: FCF Yield</span>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────
@@ -838,8 +777,8 @@ if show_comps:
     # ── Colour ABI row differently via styling ──
     def style_row(row):
         if row.name == FOCUS_TICKER:   # row.name is the index value after set_index("Ticker")
-            return ["background-color: rgba(230,57,70,0.08); color: #f0f4ff; font-weight:600"] * len(row)
-        return [""] * len(row)
+            return [f"background-color:rgba(230,57,70,0.10);color:{_T['text_primary']};font-weight:600"] * len(row)
+        return [f"color:{_T['text_muted']}"] * len(row)
 
     def highlight_extremes(s):
         """Highlight highest/lowest values in each numeric column."""
@@ -882,13 +821,13 @@ if show_comps:
         })
         .set_table_styles([{
             "selector": "th",
-            "props": [("background-color","#0d1117"),("color","#6b7a99"),
+            "props": [("background-color",_T["bg_card"]),("color",_T["text_faint"]),
                       ("font-size","0.7rem"),("font-family","IBM Plex Mono, monospace"),
-                      ("border-bottom","1px solid #1e2530"),("text-align","right")]
+                      ("border-bottom","1px solid "+_T["border"]),("text-align","right")]
         },{
             "selector": "td",
             "props": [("font-family","IBM Plex Mono, monospace"),("font-size","0.78rem"),
-                      ("border-bottom","1px solid #1a1f2e"),("text-align","right")]
+                      ("border-bottom","1px solid "+_T["border"]),("text-align","right")]
         }])
     )
 
