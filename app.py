@@ -561,7 +561,7 @@ def scatter_multiple_vs_growth(df: pd.DataFrame) -> go.Figure:
                 size=max(row["Mkt Cap ($B)"] ** 0.45 * 6, 12),
                 color=COLORS.get(row["Ticker"], COLORS["default"]),
                 line=dict(width=2 if is_focus else 0,
-                          color="#ffffff" if is_focus else "transparent"),
+                          color="#ffffff" if is_focus else "rgba(0,0,0,0)"),
                 opacity=0.9,
             ),
             text=[row["Ticker"]],
