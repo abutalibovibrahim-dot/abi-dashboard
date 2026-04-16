@@ -22,11 +22,6 @@ warnings.filterwarnings("ignore")
 
 # ──────────────────────────────────────────────
 # PERSISTENT CACHE — last known good data
-# Streamlit Cloud gives each app a writable /tmp directory.
-# We save the last successful fetch here as JSON so if Yahoo
-# Finance is rate-limiting, the dashboard can show stale data
-# rather than going blank. The timestamp tells the user how
-# old the data is so they know it may not be live.
 # ──────────────────────────────────────────────
 CACHE_FILE = "/tmp/abi_dashboard_cache.json"
 
@@ -75,10 +70,6 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
 # DARK THEME CONSTANTS
-# Always dark — no switching logic needed.
-# All colours defined once here as a dict so they can be
-# referenced in both CSS (via f-string injection) and
-# Python components like Plotly and pandas styler.
 # ──────────────────────────────────────────────
 _T = {
     "bg_page":      "#0a0e14",
@@ -295,10 +286,6 @@ COLORS = {
 
 # ──────────────────────────────────────────────
 # DATA LAYER
-# Strategy: use fast_info + financials endpoints instead of .info
-# .info is the most rate-limited Yahoo Finance endpoint.
-# fast_info, .financials, and .balance_sheet use separate endpoints
-# that are significantly more reliable on shared cloud IPs.
 # ──────────────────────────────────────────────
 
 def _safe(val, default=None):
@@ -309,6 +296,32 @@ def _safe(val, default=None):
         return val if val != 0 else default
     except Exception:
         return default
+
+
+def _parse_yield(raw) -> float | None:
+    """
+    Yahoo Finance returns dividendYield inconsistently:
+    - Most tickers: decimal form  e.g. 0.0142  → means 1.42%
+    - Some tickers: already as %  e.g. 1.42    → means 1.42%
+    - Zero dividend payers: 0.0   → should show 0.00%, not None
+    - No dividend data: None      → show dash
+
+    Rule: if value exists (including 0), treat as decimal and multiply by 100.
+    Cap sanity check at 30% — anything above is almost certainly already
+    in percentage form, so we use it as-is.
+    """
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+        if val > 0.30:
+            # Already in percentage form (e.g. 1.42 meaning 1.42%)
+            return round(val, 2)
+        else:
+            # Decimal form (e.g. 0.0142 meaning 1.42%)
+            return round(val * 100, 2)
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_financials(tkr: str) -> dict:
@@ -451,7 +464,7 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                 "Net Margin":      round(d.get("net_margin")*100,1) if d.get("net_margin") else None,
                 "Rev Growth YoY":  round(d.get("rev_growth")*100,1) if d.get("rev_growth") else None,
                 "Net Debt/EBITDA": round(net_debt_ebitda,1)          if net_debt_ebitda     else None,
-                "Div Yield":       round(d.get("div_yield")*100,2)   if d.get("div_yield")  else None,
+                "Div Yield":       _parse_yield(d.get("div_yield")),
                 "Payout Ratio":    round(d.get("payout")*100,1)      if d.get("payout")     else None,
                 "Beta":            round(d.get("beta"),2)             if d.get("beta")       else None,
                 "Short % Float":   round(d.get("short_pct")*100,2)   if d.get("short_pct")  else None,
